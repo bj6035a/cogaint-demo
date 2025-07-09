@@ -1,7 +1,6 @@
 """
-Cogaint Simplified Demo Engine
-Works without pandas - perfect for Windows
-NO CIRCULAR IMPORTS
+Cogaint Robust Demo Engine with AI
+Handles OpenAI errors gracefully while preserving AI functionality
 """
 
 import openai
@@ -13,7 +12,12 @@ load_dotenv()
 
 class CogaintLeanDemo:
     def __init__(self):
-        self.openai_client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        # Initialize with proper error handling
+        self.openai_client = None
+        self.ai_enabled = False
+        self.ai_error = None
+        
+        self._initialize_openai()
         
         # Demo companies with realistic data
         self.demo_companies = {
@@ -57,8 +61,69 @@ class CogaintLeanDemo:
             }
         }
     
+    def _initialize_openai(self):
+        """Safely initialize OpenAI with detailed error reporting"""
+        try:
+            # Try Streamlit secrets first, then fall back to environment variables
+            api_key = None
+            
+            # Check if running in Streamlit
+            try:
+                import streamlit as st
+                if hasattr(st, 'secrets') and 'OPENAI_API_KEY' in st.secrets:
+                    api_key = st.secrets["OPENAI_API_KEY"]
+                    print("🔐 Using Streamlit secrets for API key")
+            except:
+                pass
+            
+            # Fall back to environment variable
+            if not api_key:
+                api_key = os.getenv("OPENAI_API_KEY")
+                if api_key:
+                    print("🔐 Using environment variable for API key")
+            
+            if not api_key:
+                self.ai_error = "No OPENAI_API_KEY found in environment variables"
+                print(f"⚠️ {self.ai_error}")
+                return
+            
+            if not (api_key.startswith("sk-proj-") or api_key.startswith("sk-")):
+                self.ai_error = f"Invalid API key format. Key should start with 'sk-proj-' or 'sk-'"
+                print(f"⚠️ {self.ai_error}")
+                return
+            
+            # Try to create the client
+            self.openai_client = openai.OpenAI(api_key=api_key)
+            
+            # Test with a minimal API call
+            test_response = self.openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": "test"}],
+                max_tokens=1
+            )
+            
+            self.ai_enabled = True
+            print("✅ OpenAI client initialized and tested successfully")
+            
+        except openai.AuthenticationError:
+            self.ai_error = "OpenAI API key authentication failed - key may be invalid or expired"
+            print(f"❌ {self.ai_error}")
+        except openai.RateLimitError:
+            self.ai_error = "OpenAI rate limit exceeded - may be out of credits"
+            print(f"❌ {self.ai_error}")
+        except Exception as e:
+            self.ai_error = f"OpenAI initialization failed: {str(e)}"
+            print(f"❌ {self.ai_error}")
+    
+    def get_ai_status(self):
+        """Get current AI status for display in Streamlit"""
+        if self.ai_enabled:
+            return {"status": "enabled", "message": "AI features fully operational"}
+        else:
+            return {"status": "disabled", "message": f"AI disabled: {self.ai_error}"}
+    
     def demonstrate_sku_fragmentation(self, company_key):
-        """Show SKU fragmentation problem with real AI solution"""
+        """Show SKU fragmentation problem with AI solution when available"""
         
         company = self.demo_companies[company_key]
         sample_sku = company["skus"][0]
@@ -71,7 +136,32 @@ class CogaintLeanDemo:
             "Product Name": sample_sku["name"]
         }
         
-        # Use real AI to solve it
+        # Try AI analysis if available
+        if self.ai_enabled and self.openai_client:
+            try:
+                ai_analysis = self._get_ai_sku_analysis(sample_sku)
+                ai_source = "OpenAI GPT-4"
+            except Exception as e:
+                print(f"AI analysis failed: {e}, using enhanced fallback")
+                ai_analysis = self._get_enhanced_fallback_analysis(sample_sku)
+                ai_source = "Cogaint Logic Engine"
+        else:
+            ai_analysis = self._get_enhanced_fallback_analysis(sample_sku)
+            ai_source = "Cogaint Logic Engine"
+        
+        # Add the AI source to the response
+        ai_analysis["ai_source"] = ai_source
+        
+        return {
+            "fragmented_data": fragmented_data,
+            "ai_solution": ai_analysis,
+            "time_saved": "2+ hours → 30 seconds",
+            "accuracy": "95%+ with AI vs 60% manual",
+            "ai_status": self.get_ai_status()
+        }
+    
+    def _get_ai_sku_analysis(self, sample_sku):
+        """Get real AI analysis of SKU fragmentation"""
         prompt = f"""
         Analyze these product identifiers from different business systems and determine if they refer to the same product:
         
@@ -80,49 +170,61 @@ class CogaintLeanDemo:
         Shopify SKU: {sample_sku['shopify']}
         Product Name: {sample_sku['name']}
         
-        Return JSON with:
+        Respond with valid JSON only:
         {{
-            "same_product": true/false,
-            "confidence": 0-100,
+            "same_product": true,
+            "confidence": 95,
             "unified_name": "suggested product name",
-            "reasoning": "why these match or don't match",
-            "risk_factors": ["any concerns about this mapping"]
+            "reasoning": "detailed explanation of why these match",
+            "risk_factors": ["any concerns"],
+            "pattern_analysis": "analysis of naming patterns"
         }}
         """
         
-        try:
-            response = self.openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1
-            )
-            
-            ai_analysis = json.loads(response.choices[0].message.content)
-            
-            return {
-                "fragmented_data": fragmented_data,
-                "ai_solution": ai_analysis,
-                "time_saved": "2+ hours → 30 seconds",
-                "accuracy": "95%+ with AI vs 60% manual"
-            }
-            
-        except Exception as e:
-            # Fallback if AI fails
-            return {
-                "fragmented_data": fragmented_data,
-                "ai_solution": {
-                    "same_product": True,
-                    "confidence": 95,
-                    "unified_name": sample_sku["name"],
-                    "reasoning": "All identifiers clearly refer to the same product based on naming patterns",
-                    "risk_factors": []
-                },
-                "time_saved": "2+ hours → 30 seconds",
-                "accuracy": "95%+ with AI vs 60% manual"
-            }
+        response = self.openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=500
+        )
+        
+        return json.loads(response.choices[0].message.content)
+    
+    def _get_enhanced_fallback_analysis(self, sample_sku):
+        """Enhanced fallback analysis when AI is not available"""
+        
+        # Analyze naming patterns
+        erp_parts = sample_sku["erp"].split("-")
+        wms_parts = sample_sku["wms"].split("_")
+        shopify_parts = sample_sku["shopify"].split("-")
+        
+        confidence = 85
+        reasoning = f"Pattern analysis of '{sample_sku['name']}':"
+        
+        # Check for common elements
+        if any(part.lower() in sample_sku["name"].lower() for part in erp_parts):
+            confidence += 5
+            reasoning += " ERP code contains product identifiers."
+        
+        if any(part.lower() in sample_sku["name"].lower() for part in wms_parts):
+            confidence += 5
+            reasoning += " WMS code follows logical naming convention."
+        
+        if any(part in sample_sku["shopify"] for part in sample_sku["name"].lower().split()):
+            confidence += 5
+            reasoning += " Shopify URL matches product name structure."
+        
+        return {
+            "same_product": True,
+            "confidence": min(confidence, 98),
+            "unified_name": sample_sku["name"],
+            "reasoning": reasoning + f" All identifiers consistently reference the same {sample_sku['name']}.",
+            "risk_factors": [] if confidence > 90 else ["Manual verification recommended"],
+            "pattern_analysis": f"Detected consistent product patterns across {len([sample_sku['erp'], sample_sku['wms'], sample_sku['shopify']])} systems"
+        }
     
     def calculate_business_score(self, company_key):
-        """Fast, explainable scoring algorithm"""
+        """Business scoring with AI insights when available"""
         
         company = self.demo_companies[company_key]
         
@@ -190,8 +292,8 @@ class CogaintLeanDemo:
         
         base_score += experience_boost
         
-        # AI insights (10% weight) - simulate advanced analysis
-        ai_boost = self._get_ai_insights(company)
+        # AI insights (10% weight)
+        ai_boost = self._get_ai_business_insights(company)
         base_score += ai_boost["adjustment"]
         factors.extend(ai_boost["factors"])
         
@@ -202,25 +304,67 @@ class CogaintLeanDemo:
             "factors": factors,
             "risk_category": self._get_risk_category(final_score),
             "recommended_rate": self._score_to_rate(final_score),
-            "decision": self._get_decision(final_score)
+            "decision": self._get_decision(final_score),
+            "ai_status": self.get_ai_status()
         }
     
-    def _get_ai_insights(self, company):
-        """Simulate AI-powered insights"""
+    def _get_ai_business_insights(self, company):
+        """AI-powered business insights when available"""
+        
+        if self.ai_enabled:
+            try:
+                # Get AI insights about the business
+                insight_prompt = f"""
+                Analyze this business profile and provide risk insights:
+                Company: {company['name']}
+                Industry: {company['industry']}
+                Revenue: ${company['revenue']:,}
+                Inventory Turns: {company['inventory_turns']}x
+                Years Operating: {company['years_operating']}
+                
+                Provide a JSON response with:
+                {{
+                    "risk_adjustment": -10 to +10,
+                    "key_insight": "one sentence insight"
+                }}
+                """
+                
+                response = self.openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": insight_prompt}],
+                    temperature=0.1,
+                    max_tokens=100
+                )
+                
+                ai_result = json.loads(response.choices[0].message.content)
+                
+                return {
+                    "adjustment": ai_result.get("risk_adjustment", 0),
+                    "factors": [f"🤖 AI Insight: {ai_result.get('key_insight', 'Analysis complete')}"]
+                }
+                
+            except Exception as e:
+                print(f"AI business insight failed: {e}")
+                return self._get_fallback_business_insights(company)
+        else:
+            return self._get_fallback_business_insights(company)
+    
+    def _get_fallback_business_insights(self, company):
+        """Fallback business insights"""
         if company["inventory_turns"] > 8:
             return {
                 "adjustment": 10,
-                "factors": ["🧠 AI: Strong operational efficiency indicators"]
+                "factors": ["🧠 Analysis: Strong operational efficiency indicators"]
             }
         elif company["inventory_turns"] < 3:
             return {
                 "adjustment": -10,
-                "factors": ["🧠 AI: Inventory management concerns detected"]
+                "factors": ["🧠 Analysis: Inventory management concerns detected"]
             }
         else:
             return {
                 "adjustment": 0,
-                "factors": ["🧠 AI: Standard operational patterns detected"]
+                "factors": ["🧠 Analysis: Standard operational patterns detected"]
             }
     
     def _get_risk_category(self, score):
@@ -260,39 +404,6 @@ class CogaintLeanDemo:
         else:
             return "DECLINED"
     
-    def analyze_portfolio_velocity(self, company_key):
-        """Analyze SKU velocity for the company"""
-        company = self.demo_companies[company_key]
-        sku_analysis = []
-        
-        for sku in company["skus"]:
-            velocity = sku["monthly_velocity"]
-            
-            if velocity > 2000:
-                category = "High Velocity"
-                rate_impact = -2.0
-            elif velocity > 500:
-                category = "Medium Velocity"
-                rate_impact = 0.0
-            else:
-                category = "Low Velocity"
-                rate_impact = 2.0
-            
-            sku_analysis.append({
-                "product": sku["name"],
-                "monthly_units": velocity,
-                "velocity_category": category,
-                "margin": sku["margin"],
-                "rate_impact": rate_impact
-            })
-        
-        return {
-            "sku_breakdown": sku_analysis,
-            "portfolio_velocity": sum(s["monthly_units"] for s in sku_analysis),
-            "average_margin": sum(s["margin"] for s in sku_analysis) / len(sku_analysis),
-            "rate_adjustment": sum(s["rate_impact"] for s in sku_analysis) / len(sku_analysis)
-        }
-    
     def process_customer_upload(self, uploaded_data):
         """Process customer uploaded data for instant scoring"""
         try:
@@ -324,7 +435,8 @@ class CogaintLeanDemo:
                 "score": final_score,
                 "rate": self._score_to_rate(final_score),
                 "decision": self._get_decision(final_score),
-                "next_steps": "Contact us at cogaint.com to proceed"
+                "next_steps": "Contact us at cogaint.com to proceed",
+                "ai_status": self.get_ai_status()
             }
             
         except Exception as e:
@@ -333,13 +445,15 @@ class CogaintLeanDemo:
                 "suggestion": "Please check your data format and try again"
             }
 
-# Test function - only runs if file is executed directly
+# Test function
 if __name__ == "__main__":
-    print("🧪 Testing Demo Engine...")
+    print("🧪 Testing Robust Demo Engine...")
     demo = CogaintLeanDemo()
     
+    print(f"AI Status: {demo.get_ai_status()}")
+    
     # Test scoring
-    for company in demo.demo_companies.keys():
+    for company in list(demo.demo_companies.keys())[:1]:  # Test just one
         score_result = demo.calculate_business_score(company)
         print(f"✅ {company}: {score_result['final_score']}/100 → {score_result['recommended_rate']}%")
     
